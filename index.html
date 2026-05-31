@@ -559,33 +559,48 @@ const IMMERSION = "Never use real names, proper nouns, nationalities, cities, or
 
 // ── Replace this URL with your Cloudflare Worker URL after deployment ────────
 const WORKER_URL = "https://tmisproxy.justanantvijay.workers.dev";
+async function sleep(ms) {
+  return new Promise(res => setTimeout(res, ms));
+}
 async function aiText(sys, msg, tokens = 380) {
   if (!WORKER_URL || WORKER_URL === "YOUR_WORKER_URL_HERE") {
     throw new Error("Worker URL not configured");
   }
-  const r = await fetch(WORKER_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: tokens,
-      system: sys,
-      messages: [{
-        role: "user",
-        content: msg
-      }]
-    })
+  const body = JSON.stringify({
+    model: "claude-sonnet-4-20250514",
+    max_tokens: tokens,
+    system: sys,
+    messages: [{
+      role: "user",
+      content: msg
+    }]
   });
-  if (!r.ok) throw new Error(`Worker error: ${r.status}`);
-  const d = await r.json();
-  if (!d.content || !Array.isArray(d.content) || d.content.length === 0) {
-    throw new Error(d.error?.message || "Empty response from API");
+  // Retry with exponential backoff on 429 (rate limit)
+  const delays = [1500, 3000, 6000, 10000];
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    const r = await fetch(WORKER_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body
+    });
+    if (r.status === 429) {
+      if (attempt < delays.length) {
+        await sleep(delays[attempt]);
+        continue;
+      }
+      throw new Error("Rate limit — please wait a moment and try again");
+    }
+    if (!r.ok) throw new Error(`Worker error: ${r.status}`);
+    const d = await r.json();
+    if (!d.content || !Array.isArray(d.content) || d.content.length === 0) {
+      throw new Error(d.error?.message || "Empty response from API");
+    }
+    const text = d.content.map(i => i.text || "").join("");
+    if (!text) throw new Error("No text in response");
+    return text;
   }
-  const text = d.content.map(i => i.text || "").join("");
-  if (!text) throw new Error("No text in response");
-  return text;
 }
 async function aiJSON(sys, msg, tokens = 280) {
   const t = await aiText(sys, msg, tokens);
