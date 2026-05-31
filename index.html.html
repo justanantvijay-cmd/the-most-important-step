@@ -1,0 +1,2359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>The Most Important Step</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=IM+Fell+English:ital@0;1&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+
+body {
+  background: #0a0a0a;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  color: #fff;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+input, button { font-family: inherit; }
+input::placeholder { color: #404040; }
+button:focus { outline: none; }
+
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: #0a0a0a; }
+::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 2px; }
+
+/* Stat bar animations */
+@keyframes ecg-pulse {
+  0%, 86%, 100% { opacity: 1; }
+  91% { opacity: 0.45; }
+  96% { opacity: 1; }
+}
+@keyframes ecg-critical {
+  0%, 62%, 100% { opacity: 1; transform: scaleY(1); }
+  67% { opacity: 0.1; transform: scaleY(0.4); }
+  75% { opacity: 1; transform: scaleY(1.4); }
+  82% { opacity: 0.3; transform: scaleY(0.7); }
+  88% { opacity: 1; }
+}
+.stat-fill { animation: ecg-pulse 3.5s ease-in-out infinite; }
+.stat-fill.critical { animation: ecg-critical 1.5s ease-in-out infinite; }
+
+/* Pulse dots loading */
+@keyframes dot-bounce {
+  0%, 80%, 100% { transform: scale(0.5); opacity: 0.25; }
+  40% { transform: scale(1); opacity: 1; }
+}
+.pulse-dot { animation: dot-bounce 1.2s ease-in-out infinite; display: inline-block; }
+
+/* Screen entrance */
+@keyframes slide-in {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.screen { animation: slide-in 0.35s ease forwards; }
+
+/* Orb drift */
+@keyframes orb-drift {
+  from { transform: translate(-50%, -50%) scale(1); }
+  to   { transform: translate(-50%, -50%) scale(1.15) translate(8px, -6px); }
+}
+
+/* Crack animation — cracks grow in */
+@keyframes crack-in {
+  from { stroke-dashoffset: 1000; opacity: 0; }
+  to   { stroke-dashoffset: 0; opacity: 1; }
+}
+.crack-path {
+  stroke-dasharray: 1000;
+  animation: crack-in 1.8s ease forwards;
+}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const {
+  useState,
+  useEffect,
+  useRef
+} = React;
+
+// ── STORAGE HELPERS (Hades-style run memory) ─────────────────────────────────
+
+const HAS_STORAGE = typeof window !== "undefined" && window.storage && typeof window.storage.get === "function";
+async function loadMemory() {
+  if (!HAS_STORAGE) {
+    // Fallback: try localStorage when window.storage unavailable (direct file open)
+    try {
+      const v = localStorage.getItem("tmis-run-memory");
+      return v ? JSON.parse(v) : null;
+    } catch {
+      return null;
+    }
+  }
+  try {
+    const r = await window.storage.get("tmis-run-memory");
+    return r ? JSON.parse(r.value) : null;
+  } catch {
+    return null;
+  }
+}
+async function saveMemory(data) {
+  if (!HAS_STORAGE) {
+    try {
+      localStorage.setItem("tmis-run-memory", JSON.stringify(data));
+    } catch {}
+    return;
+  }
+  try {
+    await window.storage.set("tmis-run-memory", JSON.stringify(data));
+  } catch {}
+}
+
+// ── DATA ──────────────────────────────────────────────────────────────────────
+
+const ARCHETYPES = [{
+  id: "freak",
+  name: "The Fitness Freak",
+  desc: "You track everything. Pace, cadence, heart rate zones. You have a plan and you think you're better than everyone else. You're probably right.",
+  stats: {
+    stamina: 8,
+    focus: 4,
+    painTolerance: 6,
+    willpower: 5
+  },
+  demonBias: ["Shame", "Rage"],
+  endingFlavour: {
+    the_high: "There's a number attached to this. You already know which personal best you just beat.",
+    hollow: "The watch says finished. The watch doesn't know what it felt like.",
+    grimaced: "Your form held longer than your head did. You'll count that.",
+    broken_awake: "You watched yourself fall apart with alarming precision. You noted everything.",
+    just_broken: "You finished. Whatever the data says about today — you know the real number.",
+    dnf: "You'll tell yourself it was a training decision. It might even be true."
+  }
+}, {
+  id: "workaholic",
+  name: "The Stressed Workaholic",
+  desc: "Your calendar is a war zone. You run because someone said try something other than working late. You're already thinking about that email.",
+  stats: {
+    stamina: 5,
+    focus: 3,
+    painTolerance: 5,
+    willpower: 8
+  },
+  demonBias: ["Anxiety", "Obsession"],
+  endingFlavour: {
+    the_high: "For about forty seconds you forgot every single thing you needed to do. Forty seconds.",
+    hollow: "You were somewhere else for most of it. The run happened. You were elsewhere.",
+    grimaced: "Your body ran it. Your head was already back at the desk.",
+    broken_awake: "You came apart in real time and somehow still kept the pace.",
+    just_broken: "You gave it everything. Everything was already spent before you started.",
+    dnf: "You'll tell yourself you'll finish it tomorrow. You know how that goes."
+  }
+}, {
+  id: "worrier",
+  name: "The Health Worrier",
+  desc: "You Googled your symptoms last night. Running is preventative medicine. Or maybe it'll kill you. You genuinely haven't decided.",
+  stats: {
+    stamina: 4,
+    focus: 6,
+    painTolerance: 4,
+    willpower: 6
+  },
+  demonBias: ["Anxiety", "Sadness"],
+  endingFlavour: {
+    the_high: "You're still alive. That's worth noting. You note it.",
+    hollow: "You finished. You're still here, which was the original concern.",
+    grimaced: "Your heart rate was probably fine. You'll check later.",
+    broken_awake: "Something broke. You're not sure which part. You'll monitor it.",
+    just_broken: "You'll look this up later. What it means when your body finishes but your self doesn't.",
+    dnf: "Stopping was the sensible choice. You're good at sensible choices."
+  }
+}, {
+  id: "redemption",
+  name: "The Reluctant Redemption-Seeker",
+  desc: "You're not here because you want to be. Every step is a small apology to nobody in particular.",
+  stats: {
+    stamina: 4,
+    focus: 5,
+    painTolerance: 8,
+    willpower: 4
+  },
+  demonBias: ["Sadness", "Shame"],
+  endingFlavour: {
+    the_high: "You didn't want to be here. You're still not sure what changed.",
+    hollow: "You finished. It doesn't feel like you thought it would. Nothing does.",
+    grimaced: "You couldn't quit. Not because you're strong. Just because.",
+    broken_awake: "You owe someone something you can't name. You didn't pay it today.",
+    just_broken: "You crossed the line and it wasn't enough. It's never enough. That's not the run's fault.",
+    dnf: "You stopped. Maybe the apology was just for today."
+  }
+}, {
+  id: "custom",
+  name: "Build Your Own",
+  desc: "You know who you are today. Distribute 23 points. Your demons will find you either way.",
+  stats: {
+    stamina: 5,
+    focus: 5,
+    painTolerance: 5,
+    willpower: 5
+  },
+  demonBias: [],
+  endingFlavour: {
+    the_high: "You made something of it.",
+    hollow: "Something's quieter now.",
+    grimaced: "The body carried you.",
+    broken_awake: "You watched yourself. That counted.",
+    just_broken: "You crossed the line.",
+    dnf: "You stopped when you needed to."
+  }
+}];
+const FIT = {
+  Anxiety: {
+    "Move Through It": "adjacent",
+    "Contain It": "primary",
+    "Step Outside": "adjacent",
+    "Push Back": "dissonant"
+  },
+  Rage: {
+    "Move Through It": "neutral",
+    "Contain It": "dissonant",
+    "Step Outside": "adjacent",
+    "Push Back": "primary"
+  },
+  Sadness: {
+    "Move Through It": "primary",
+    "Contain It": "adjacent",
+    "Step Outside": "dissonant",
+    "Push Back": "neutral"
+  },
+  Shame: {
+    "Move Through It": "dissonant",
+    "Contain It": "adjacent",
+    "Step Outside": "primary",
+    "Push Back": "neutral"
+  },
+  Obsession: {
+    "Move Through It": "dissonant",
+    "Contain It": "neutral",
+    "Step Outside": "primary",
+    "Push Back": "adjacent"
+  }
+};
+const ALL_DEMONS = ["Anxiety", "Rage", "Sadness", "Shame", "Obsession"];
+const RESPONSES = [{
+  id: "Move Through It",
+  label: "Move Through It",
+  desc: "Keep moving. Let the thought trail behind you."
+}, {
+  id: "Contain It",
+  label: "Contain It",
+  desc: "Box it. Deal with it after. Not now."
+}, {
+  id: "Step Outside",
+  label: "Step Outside",
+  desc: "Watch it from a distance. It's just a thing happening."
+}, {
+  id: "Push Back",
+  label: "Push Back",
+  desc: "No. Not today."
+}];
+const BRUTAL_HINTS = {
+  Anxiety: "Anxiety doesn't want a fight. It wants your full attention. The harder you push, the more space you give it.",
+  Rage: "Anger likes an audience. Containing it or stepping back starves it. Meeting it head-on just adds fuel.",
+  Sadness: "Watching sadness from a distance lets it settle into something permanent. It needs movement, not observation.",
+  Shame: "Moving through shame forces you to look straight at it. That's exactly what it wants.",
+  Obsession: "Engaging with a loop — even to fight it — keeps the loop running. The only exit is not entering."
+};
+const STAGES = [{
+  id: "start",
+  name: "The Start Line",
+  subtitle: "Pre-run dread",
+  km: "0.0",
+  ecgType: "calm"
+}, {
+  id: "first_mile",
+  name: "The First Mile",
+  subtitle: "False confidence",
+  km: "1.6",
+  ecgType: "elevated"
+}, {
+  id: "wall",
+  name: "The Wall",
+  subtitle: "Psychological collapse",
+  km: "4.2",
+  ecgType: "erratic"
+}, {
+  id: "void",
+  name: "The Void",
+  subtitle: "Regret. Every decision.",
+  km: "7.0",
+  ecgType: "chaotic"
+}, {
+  id: "finish",
+  name: "The Finish",
+  subtitle: "Resolution",
+  km: "10.0",
+  ecgType: "resolved"
+}];
+const DEMONS_PER_STAGE = 2;
+const LAST_IDX = STAGES.length - 1;
+const ENDINGS = {
+  the_high: {
+    label: "10.0 km · COMPLETE",
+    headline: "You made it. You don't know how. You don't care.",
+    color: "#FC4C02",
+    bg: "#0a0600"
+  },
+  hollow: {
+    label: "10.0 km · SOMETHING'S GONE",
+    headline: "You crossed the line. Something went quiet somewhere around kilometre 6.",
+    color: "#9abacc",
+    bg: "#03080a"
+  },
+  grimaced: {
+    label: "10.0 km · BODY WON",
+    headline: "Your mind quit. Your body didn't get the message.",
+    color: "#c8a96e",
+    bg: "#0a0800"
+  },
+  broken_awake: {
+    label: "10.0 km · FINISHED BROKEN",
+    headline: "You fell apart and watched yourself do it. That counts for something.",
+    color: "#cc99bb",
+    bg: "#07040a"
+  },
+  just_broken: {
+    label: "10.0 km · FINISHED BROKEN",
+    headline: "You crossed the line. Something stayed out there on the road.",
+    color: "#c87e7e",
+    bg: "#0a0303"
+  },
+  dnf: {
+    label: "DNF · DID NOT FINISH",
+    headline: "You stopped. You went home. That's also a choice.",
+    color: "#888",
+    bg: "#080808"
+  }
+};
+const STAGE_ACCENT = {
+  start: "#5a7ab5",
+  first_mile: "#5aaa6a",
+  wall: "#c04040",
+  void: "#cccccc",
+  finish: "#FC4C02"
+};
+
+// ECG path data per screen type
+const ECG_PATHS = {
+  calm: "0,20 80,20 90,14 96,26 102,20 240,20 250,14 256,26 262,20 400,20 410,14 416,26 422,20 480,20",
+  elevated: "0,20 60,20 70,10 78,30 86,8 94,32 102,20 200,20 210,10 218,30 226,8 234,32 242,20 340,20 350,10 358,30 366,8 374,32 382,20 480,20",
+  erratic: "0,20 40,20 48,6 56,34 62,2 70,38 78,20 110,20 118,8 126,32 132,4 140,36 148,20 180,20 188,4 200,36 208,1 218,39 228,20 280,24 300,16 320,20 330,6 340,34 348,2 356,38 364,20 420,20 430,8 440,32 450,4 460,36 470,20 480,20",
+  chaotic: "0,18 20,22 30,5 38,35 44,1 52,39 60,20 80,25 90,10 98,32 102,15 108,38 114,3 120,28 126,20 140,16 150,28 158,6 166,34 172,2 180,38 188,15 196,25 204,20 220,30 230,8 238,36 244,1 252,39 260,18 275,24 285,14 295,28 305,8 315,32 325,2 335,38 345,20 365,28 375,10 385,36 395,4 405,38 415,20 440,24 450,14 460,30 468,8 476,20 480,22",
+  resolved: "0,20 100,20 115,12 122,28 128,20 250,20 260,15 266,25 272,20 400,20 410,14 416,26 422,20 480,20",
+  combat: "0,20 25,20 33,4 42,36 50,1 58,39 66,20 90,20 98,6 108,34 116,2 124,38 132,20 155,20 163,4 174,36 182,0 192,40 200,20 225,20 233,5 244,35 252,1 262,39 270,20 295,20 303,6 314,34 322,2 332,38 340,20 365,20 373,4 384,36 392,0 402,40 410,20 440,20 450,8 460,32 468,4 476,36 480,20",
+  victory: "0,20 120,20 130,8 138,32 144,20 280,20 288,10 294,30 300,20 420,20 426,12 432,28 438,20 480,20",
+  flatline: "0,20 200,20 210,18 215,22 220,20 480,20"
+};
+
+// Crack SVG paths — each stage adds more, they grow
+const CRACK_SETS = [[],
+// start — no cracks
+[
+// first mile — hairlines appear
+"M 95 0 L 88 45 L 92 80", "M 320 100 L 315 140 L 322 180"], [
+// wall — cracks spread
+"M 95 0 L 88 45 L 92 80 L 84 130", "M 320 100 L 315 140 L 322 180 L 310 230", "M 10 200 L 25 240 L 18 280", "M 450 50 L 440 90 L 448 120"], [
+// void — full network
+"M 95 0 L 88 45 L 92 80 L 84 130 L 78 200 L 90 280", "M 320 100 L 315 140 L 322 180 L 310 230 L 318 300", "M 10 200 L 25 240 L 18 280 L 30 350", "M 450 50 L 440 90 L 448 120 L 435 180 L 442 240", "M 180 0 L 172 60 L 185 120 L 178 200", "M 400 300 L 415 340 L 408 400", "M 60 350 L 75 380 L 68 430"], [] // finish — cracks gone (resolution)
+];
+
+// Ambient light orbs per stage
+const ORBS = [[],
+// start
+[{
+  cx: "85%",
+  cy: "15%",
+  r: 120,
+  color: "rgba(90,170,106,0.04)"
+}],
+// first mile — faint green
+[{
+  cx: "85%",
+  cy: "15%",
+  r: 160,
+  color: "rgba(192,64,64,0.06)"
+}, {
+  cx: "10%",
+  cy: "70%",
+  r: 100,
+  color: "rgba(192,64,64,0.04)"
+}],
+// wall — red
+[
+// void — wrong colours, wrong positions
+{
+  cx: "50%",
+  cy: "20%",
+  r: 200,
+  color: "rgba(180,160,220,0.07)"
+}, {
+  cx: "15%",
+  cy: "50%",
+  r: 140,
+  color: "rgba(100,200,180,0.05)"
+}, {
+  cx: "80%",
+  cy: "75%",
+  r: 160,
+  color: "rgba(220,180,100,0.05)"
+}, {
+  cx: "40%",
+  cy: "85%",
+  r: 120,
+  color: "rgba(160,100,200,0.04)"
+}], [{
+  cx: "50%",
+  cy: "50%",
+  r: 300,
+  color: "rgba(252,76,2,0.05)"
+}] // finish — warm centre glow
+];
+
+// ── GAME LOGIC ────────────────────────────────────────────────────────────────
+
+function rollD20() {
+  return Math.floor(Math.random() * 20) + 1;
+}
+function pickDemonType(archetype, stats) {
+  const bias = archetype.demonBias?.length ? archetype.demonBias : ALL_DEMONS;
+  const weak = [];
+  if (stats.focus <= 3) weak.push("Anxiety", "Obsession");
+  if (stats.willpower <= 3) weak.push("Rage", "Shame", "Sadness");
+  const pool = [...bias, ...weak, ...ALL_DEMONS];
+  return pool[Math.floor(Math.random() * Math.min(pool.length, bias.length + weak.length + 2))];
+}
+function resolveCombat(demon, response, stats) {
+  const fit = FIT[demon.type][response];
+  const roll = rollD20();
+  const focusBonus = stats.focus >= 7 ? 2 : stats.focus >= 5 ? 1 : 0;
+  const willBonus = stats.willpower >= 7 ? 3 : 0;
+  const painFloor = stats.painTolerance >= 7;
+  const eff = roll + focusBonus + (fit === "primary" ? willBonus : 0);
+  let delta, outcome;
+  if (fit === "primary") {
+    if (eff >= 16) {
+      delta = {
+        stamina: 1,
+        willpower: 1
+      };
+      outcome = "victory";
+    } else if (eff >= 9) {
+      delta = {
+        stamina: -1
+      };
+      outcome = "pyrrhic";
+    } else {
+      delta = {
+        stamina: -2
+      };
+      outcome = "loss";
+    }
+  } else if (fit === "adjacent") {
+    if (eff >= 15) {
+      delta = {
+        stamina: -1
+      };
+      outcome = "pyrrhic";
+    } else if (eff >= 8) {
+      delta = {
+        stamina: -2,
+        focus: -1
+      };
+      outcome = "loss";
+    } else {
+      delta = {
+        stamina: -2,
+        focus: -1,
+        painTolerance: -1
+      };
+      outcome = "loss";
+    }
+  } else if (fit === "neutral") {
+    if (eff >= 13) {
+      delta = {
+        stamina: -2,
+        focus: -1
+      };
+      outcome = "loss";
+    } else {
+      delta = {
+        stamina: -2,
+        focus: -1,
+        painTolerance: -1
+      };
+      outcome = "brutal";
+    }
+  } else {
+    if (eff >= 18) {
+      delta = {
+        stamina: -2,
+        willpower: -1
+      };
+      outcome = "loss";
+    } else if (eff >= 10) {
+      delta = {
+        stamina: -2,
+        focus: -1,
+        willpower: -1
+      };
+      outcome = "brutal";
+    } else {
+      delta = {
+        stamina: -3,
+        focus: -1,
+        willpower: -2
+      };
+      outcome = "brutal";
+    }
+  }
+  if (painFloor && (delta.stamina || 0) < -3) delta = {
+    ...delta,
+    stamina: -3
+  };
+  return {
+    roll,
+    fit,
+    delta,
+    outcome
+  };
+}
+function applyDelta(stats, delta) {
+  const next = {
+    ...stats
+  };
+  for (const [k, v] of Object.entries(delta)) next[k] = Math.max(0, Math.min(10, (next[k] || 0) + v));
+  return next;
+}
+function isBroken(stats) {
+  return stats.stamina <= 0 || stats.willpower <= 0;
+}
+function endingKey(stats, broken, quit) {
+  if (quit) return "dnf";
+  if (broken) return stats.focus >= 5 ? "broken_awake" : "just_broken";
+  if (stats.willpower >= 6 && stats.stamina >= 5) return "the_high";
+  if (stats.painTolerance >= 7 && stats.stamina <= 3) return "grimaced";
+  if (stats.focus <= 2) return "hollow";
+  return "the_high";
+}
+
+// ── API ───────────────────────────────────────────────────────────────────────
+
+const IMMERSION = "Never use real names, proper nouns, nationalities, cities, or cultural references. Use 'someone', 'a colleague', 'the person you live with', 'that conversation last week'. This is anyone's run, anywhere. Do not reference stat values or numbers. Do not call this a game.";
+
+// ── Replace this URL with your Cloudflare Worker URL after deployment ────────
+const WORKER_URL = "https://tmisproxy.justanantvijay.workers.dev";
+async function aiText(sys, msg, tokens = 380) {
+  if (!WORKER_URL || WORKER_URL === "YOUR_WORKER_URL_HERE") {
+    throw new Error("Worker URL not configured");
+  }
+  const r = await fetch(WORKER_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: tokens,
+      system: sys,
+      messages: [{
+        role: "user",
+        content: msg
+      }]
+    })
+  });
+  if (!r.ok) throw new Error(`Worker error: ${r.status}`);
+  const d = await r.json();
+  if (!d.content || !Array.isArray(d.content) || d.content.length === 0) {
+    throw new Error(d.error?.message || "Empty response from API");
+  }
+  const text = d.content.map(i => i.text || "").join("");
+  if (!text) throw new Error("No text in response");
+  return text;
+}
+async function aiJSON(sys, msg, tokens = 280) {
+  const t = await aiText(sys, msg, tokens);
+  return JSON.parse(t.replace(/```json|```/g, "").trim());
+}
+
+// ── DESIGN TOKENS ─────────────────────────────────────────────────────────────
+
+const C = {
+  bg: "#0a0a0a",
+  surface: "#111",
+  surfaceHigh: "#181818",
+  border: "#282828",
+  borderHigh: "#383838",
+  orange: "#FC4C02",
+  orangeDim: "#c83a00",
+  text: "#ffffff",
+  textSub: "#c0c0c0",
+  textMuted: "#707070",
+  red: "#e05555",
+  green: "#5aaa6a",
+  blue: "#5a8ab5"
+};
+
+// Clean legible stack — no monospace for body text
+const sans = "-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif";
+const mono = "'Share Tech Mono','Courier New',monospace";
+const serif = "'IM Fell English','Georgia',serif";
+
+// ── VISUAL OVERLAY COMPONENTS ─────────────────────────────────────────────────
+
+// ECG line — points change per screen type
+function ECGLine({
+  type = "calm",
+  color = C.orange,
+  height = 36,
+  opacity = 0.5
+}) {
+  const pts = ECG_PATHS[type] || ECG_PATHS.calm;
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: "100%",
+      height,
+      overflow: "hidden",
+      marginBottom: 12
+    }
+  }, /*#__PURE__*/React.createElement("svg", {
+    viewBox: `0 0 480 40`,
+    width: "100%",
+    height: height,
+    preserveAspectRatio: "none",
+    style: {
+      display: "block"
+    }
+  }, /*#__PURE__*/React.createElement("polyline", {
+    points: pts,
+    fill: "none",
+    stroke: color,
+    strokeWidth: "1.5",
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    style: {
+      opacity
+    }
+  })));
+}
+
+// Crack overlay — fixed position, pointer-events none
+function CrackOverlay({
+  stageIdx
+}) {
+  const cracks = CRACK_SETS[Math.min(stageIdx, CRACK_SETS.length - 1)] || [];
+  if (!cracks.length) return null;
+  const opacity = stageIdx === 3 ? 0.55 : stageIdx === 2 ? 0.35 : 0.2;
+  return /*#__PURE__*/React.createElement("svg", {
+    style: {
+      position: "fixed",
+      inset: 0,
+      width: "100%",
+      height: "100%",
+      pointerEvents: "none",
+      zIndex: 10
+    },
+    preserveAspectRatio: "none"
+  }, cracks.map((d, i) => /*#__PURE__*/React.createElement("path", {
+    key: i,
+    d: d,
+    fill: "none",
+    stroke: "rgba(255,255,255,0.9)",
+    strokeWidth: stageIdx === 3 ? "0.8" : "0.5",
+    vectorEffect: "non-scaling-stroke",
+    style: {
+      opacity
+    }
+  })));
+}
+
+// Ambient light orbs — fixed position, pointer-events none
+function OrbOverlay({
+  stageIdx
+}) {
+  const orbs = ORBS[Math.min(stageIdx, ORBS.length - 1)] || [];
+  if (!orbs.length) return null;
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "fixed",
+      inset: 0,
+      pointerEvents: "none",
+      zIndex: 5,
+      overflow: "hidden"
+    }
+  }, orbs.map((o, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: {
+      position: "absolute",
+      left: o.cx,
+      top: o.cy,
+      width: o.r * 2,
+      height: o.r * 2,
+      transform: "translate(-50%,-50%)",
+      borderRadius: "50%",
+      background: `radial-gradient(circle, ${o.color} 0%, transparent 70%)`,
+      animation: `orb-drift ${6 + i * 2}s ease-in-out infinite alternate`,
+      animationDelay: `${i * 1.5}s`
+    }
+  })));
+}
+
+// ── UI COMPONENTS ─────────────────────────────────────────────────────────────
+
+function MetricCard({
+  label,
+  value,
+  unit,
+  highlight,
+  danger
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: C.surfaceHigh,
+      border: `1px solid ${danger ? "#5a1a1a" : C.border}`,
+      borderTop: `2px solid ${danger ? C.red : highlight ? C.orange : C.border}`,
+      padding: "12px 14px",
+      borderRadius: 2
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      letterSpacing: "0.18em",
+      color: C.textMuted,
+      textTransform: "uppercase",
+      fontFamily: mono,
+      marginBottom: 4
+    }
+  }, label), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 22,
+      fontFamily: mono,
+      fontWeight: "bold",
+      color: danger ? C.red : highlight ? C.orange : C.text,
+      lineHeight: 1
+    }
+  }, value, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11,
+      color: C.textMuted,
+      marginLeft: 2,
+      fontWeight: "normal"
+    }
+  }, unit)));
+}
+function StatRow({
+  label,
+  value,
+  color
+}) {
+  const critical = value <= 2;
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      justifyContent: "space-between",
+      marginBottom: 4
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 13,
+      letterSpacing: "0.1em",
+      textTransform: "uppercase",
+      color: critical ? C.red : C.textSub,
+      fontFamily: mono
+    }
+  }, label), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 13,
+      fontFamily: mono,
+      color: critical ? C.red : C.text,
+      fontWeight: "bold"
+    }
+  }, value, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: C.textMuted,
+      fontWeight: "normal"
+    }
+  }, "/10"))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      height: 5,
+      background: "#1e1e1e",
+      borderRadius: 1,
+      position: "relative",
+      overflow: "visible"
+    }
+  }, [20, 40, 60, 80].map(p => /*#__PURE__*/React.createElement("div", {
+    key: p,
+    style: {
+      position: "absolute",
+      top: -1,
+      left: `${p}%`,
+      width: 1,
+      height: 7,
+      background: "#2a2a2a"
+    }
+  })), /*#__PURE__*/React.createElement("div", {
+    className: `stat-fill ${critical ? "critical" : ""}`,
+    style: {
+      height: "100%",
+      width: `${value * 10}%`,
+      background: critical ? `linear-gradient(90deg,#aa2222,${C.red})` : `linear-gradient(90deg,${color}88,${color})`,
+      borderRadius: 1,
+      transition: "width 0.5s ease",
+      boxShadow: critical ? `0 0 8px ${C.red}55` : `0 0 4px ${color}33`
+    }
+  })));
+}
+function ActivityStats({
+  player,
+  compact
+}) {
+  const {
+    stamina,
+    focus,
+    painTolerance,
+    willpower
+  } = player.stats;
+  if (compact) return /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "repeat(4,1fr)",
+      gap: 6,
+      marginBottom: 16
+    }
+  }, [{
+    l: "STM",
+    v: stamina,
+    c: C.orange,
+    d: stamina <= 2
+  }, {
+    l: "FOC",
+    v: focus,
+    c: C.blue,
+    d: focus <= 2
+  }, {
+    l: "PAIN",
+    v: painTolerance,
+    c: C.red,
+    d: painTolerance <= 2
+  }, {
+    l: "WIL",
+    v: willpower,
+    c: C.green,
+    d: willpower <= 2
+  }].map(s => /*#__PURE__*/React.createElement("div", {
+    key: s.l,
+    style: {
+      background: C.surfaceHigh,
+      border: `1px solid ${s.d ? "#5a1a1a" : C.border}`,
+      borderTop: `2px solid ${s.d ? C.red : s.c}`,
+      padding: "8px 10px",
+      borderRadius: 2
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 9,
+      color: C.textMuted,
+      letterSpacing: "0.18em",
+      fontFamily: mono,
+      marginBottom: 2
+    }
+  }, s.l), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 18,
+      fontFamily: mono,
+      fontWeight: "bold",
+      color: s.d ? C.red : C.text
+    }
+  }, s.v, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 9,
+      color: C.textMuted
+    }
+  }, "/10")))));
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: C.surface,
+      border: `1px solid ${C.border}`,
+      borderRadius: 2,
+      padding: "14px 18px",
+      marginBottom: 16
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      letterSpacing: "0.2em",
+      color: C.textMuted,
+      textTransform: "uppercase",
+      fontFamily: mono,
+      marginBottom: 12,
+      display: "flex",
+      justifyContent: "space-between"
+    }
+  }, /*#__PURE__*/React.createElement("span", null, "Biometrics \xB7 ", player.name), /*#__PURE__*/React.createElement("span", null, player.archetype.name)), /*#__PURE__*/React.createElement(StatRow, {
+    label: "Stamina",
+    value: stamina,
+    color: C.orange
+  }), /*#__PURE__*/React.createElement(StatRow, {
+    label: "Focus",
+    value: focus,
+    color: C.blue
+  }), /*#__PURE__*/React.createElement(StatRow, {
+    label: "Pain Tol.",
+    value: painTolerance,
+    color: C.red
+  }), /*#__PURE__*/React.createElement(StatRow, {
+    label: "Willpower",
+    value: willpower,
+    color: C.green
+  }));
+}
+function RunProgress({
+  stageIdx
+}) {
+  const pct = stageIdx / (STAGES.length - 1) * 100;
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: 24
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      justifyContent: "space-between",
+      marginBottom: 6
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11,
+      fontFamily: mono,
+      color: C.textMuted
+    }
+  }, STAGES[stageIdx].km, " km"), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11,
+      fontFamily: mono,
+      color: C.textMuted
+    }
+  }, "10.0 km")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      height: 4,
+      background: "#1e1e1e",
+      borderRadius: 2,
+      position: "relative"
+    }
+  }, STAGES.map((s, i) => /*#__PURE__*/React.createElement("div", {
+    key: s.id,
+    style: {
+      position: "absolute",
+      left: `${i / (STAGES.length - 1) * 100}%`,
+      top: -3,
+      width: i <= stageIdx ? 8 : 6,
+      height: i <= stageIdx ? 10 : 6,
+      borderRadius: 1,
+      transform: "translateX(-50%)",
+      transition: "all 0.4s",
+      background: i <= stageIdx ? C.orange : "#333",
+      boxShadow: i === stageIdx ? `0 0 6px ${C.orange}88` : "none"
+    }
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      height: "100%",
+      width: `${pct}%`,
+      background: `linear-gradient(90deg,${C.orangeDim},${C.orange})`,
+      borderRadius: 2,
+      transition: "width 0.8s ease"
+    }
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      justifyContent: "space-between",
+      marginTop: 8
+    }
+  }, STAGES.map((s, i) => /*#__PURE__*/React.createElement("div", {
+    key: s.id,
+    style: {
+      fontSize: 9,
+      fontFamily: mono,
+      color: i <= stageIdx ? C.orange : C.textMuted,
+      opacity: i <= stageIdx ? 1 : 0.35,
+      transition: "all 0.4s",
+      textAlign: "center"
+    }
+  }, {
+    "start": "Start",
+    "first_mile": "1 km",
+    "wall": "Wall",
+    "void": "Void",
+    "finish": "Finish"
+  }[s.id] || s.name))));
+}
+function Btn({
+  children,
+  onClick,
+  disabled,
+  variant
+}) {
+  const col = variant === "danger" ? C.red : variant === "ghost" ? C.textMuted : C.orange;
+  const bdr = variant === "danger" ? "#5a2020" : variant === "ghost" ? C.border : C.orange;
+  const hov = variant === "danger" ? "#1a0808" : variant === "ghost" ? "#161616" : "#1a0a00";
+  return /*#__PURE__*/React.createElement("button", {
+    onClick: disabled ? null : onClick,
+    disabled: !!disabled,
+    style: {
+      background: "transparent",
+      border: `1px solid ${bdr}`,
+      color: col,
+      padding: "14px 32px",
+      fontSize: 13,
+      letterSpacing: "0.2em",
+      textTransform: "uppercase",
+      cursor: disabled ? "default" : "pointer",
+      fontFamily: mono,
+      width: "100%",
+      borderRadius: 2,
+      opacity: disabled ? 0.25 : 1,
+      transition: "all 0.2s"
+    },
+    onMouseEnter: e => {
+      if (!disabled) e.currentTarget.style.background = hov;
+    },
+    onMouseLeave: e => {
+      e.currentTarget.style.background = "transparent";
+    }
+  }, children);
+}
+function Loading({
+  msg
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "36px 0",
+      textAlign: "center"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6,
+      justifyContent: "center",
+      marginBottom: 10
+    }
+  }, [0, 1, 2].map(i => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    className: "pulse-dot",
+    style: {
+      width: 5,
+      height: 5,
+      borderRadius: "50%",
+      background: C.orange,
+      animationDelay: `${i * 0.2}s`
+    }
+  }))), msg && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.textMuted,
+      fontFamily: mono,
+      letterSpacing: "0.12em"
+    }
+  }, msg));
+}
+const SHELL = {
+  minHeight: "100vh",
+  background: C.bg,
+  fontFamily: sans,
+  color: C.text,
+  padding: "24px 20px",
+  position: "relative"
+};
+
+// ── SCREENS ───────────────────────────────────────────────────────────────────
+
+function Title({
+  onStart,
+  memory
+}) {
+  const isReturn = !!memory;
+  const lastArch = memory?.archetype || "";
+  const lastEnd = memory?.endingKey || "";
+  const lastEndLabel = ENDINGS[lastEnd]?.headline || "";
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...SHELL,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxWidth: 480,
+      width: "100%"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: C.surface,
+      border: `1px solid ${C.border}`,
+      borderRadius: 2,
+      padding: "20px",
+      marginBottom: 20
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: C.textMuted,
+      letterSpacing: "0.22em",
+      textTransform: "uppercase",
+      fontFamily: mono,
+      marginBottom: 14,
+      display: "flex",
+      justifyContent: "space-between"
+    }
+  }, /*#__PURE__*/React.createElement("span", null, isReturn ? "Previous Activity" : "Today · Run Activity"), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: C.orange
+    }
+  }, "\u25CF ", isReturn ? "History Loaded" : "Recording")), /*#__PURE__*/React.createElement(ECGLine, {
+    type: "calm",
+    color: C.orange,
+    opacity: 0.5
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "1fr 1fr 1fr",
+      gap: 8,
+      marginBottom: 16
+    }
+  }, /*#__PURE__*/React.createElement(MetricCard, {
+    label: "Distance",
+    value: "10.0",
+    unit: "km",
+    highlight: true
+  }), /*#__PURE__*/React.createElement(MetricCard, {
+    label: "Elevation",
+    value: "\u2014",
+    unit: "m"
+  }), /*#__PURE__*/React.createElement(MetricCard, {
+    label: "Avg HR",
+    value: "\u2014",
+    unit: "bpm"
+  })), /*#__PURE__*/React.createElement("h1", {
+    style: {
+      fontFamily: serif,
+      fontStyle: "italic",
+      fontSize: "clamp(26px,6vw,50px)",
+      color: C.text,
+      lineHeight: 1.1,
+      marginBottom: 8
+    }
+  }, "The Most Important Step"), isReturn ? /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("p", {
+    style: {
+      fontSize: 14,
+      color: C.textSub,
+      lineHeight: 1.75,
+      fontFamily: sans,
+      marginBottom: 8
+    }
+  }, "You've been here before. Last time you ran as ", /*#__PURE__*/React.createElement("strong", {
+    style: {
+      color: C.text
+    }
+  }, lastArch), "."), lastEndLabel && /*#__PURE__*/React.createElement("p", {
+    style: {
+      fontSize: 13,
+      color: C.textMuted,
+      fontStyle: "italic",
+      fontFamily: serif,
+      lineHeight: 1.6
+    }
+  }, "\"", lastEndLabel, "\""), /*#__PURE__*/React.createElement("p", {
+    style: {
+      fontSize: 12,
+      color: C.textMuted,
+      marginTop: 10,
+      fontFamily: sans
+    }
+  }, "You know more now. That changes things.")) : /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("p", {
+    style: {
+      fontSize: 14,
+      color: C.textSub,
+      lineHeight: 1.75,
+      fontFamily: sans,
+      marginBottom: 6
+    }
+  }, "You are about to go for a run. Your body will cooperate. Your mind will not."), /*#__PURE__*/React.createElement("p", {
+    style: {
+      fontSize: 12,
+      color: C.textMuted,
+      fontFamily: sans
+    }
+  }, "You may not know everything the first time. That's fine. You will."))), /*#__PURE__*/React.createElement(Btn, {
+    onClick: onStart
+  }, isReturn ? "Run Again" : "Start Activity")));
+}
+function Character({
+  onConfirm,
+  memory
+}) {
+  const [sel, setSel] = useState(null);
+  const [cs, setCs] = useState({
+    stamina: 5,
+    focus: 5,
+    painTolerance: 5,
+    willpower: 5
+  });
+  const [name, setName] = useState(memory?.name || "");
+  const used = Object.values(cs).reduce((a, b) => a + b, 0);
+  const rem = 23 - used;
+  const ok = sel && name.trim() && (sel !== "custom" || rem === 0);
+  const adj = (s, d) => {
+    const n = cs[s] + d;
+    if (n < 1 || n > 10 || d > 0 && rem <= 0) return;
+    setCs(p => ({
+      ...p,
+      [s]: n
+    }));
+  };
+  const confirm = () => {
+    if (!ok) return;
+    const arch = ARCHETYPES.find(a => a.id === sel);
+    onConfirm({
+      archetype: arch,
+      stats: sel === "custom" ? {
+        ...cs
+      } : {
+        ...arch.stats
+      },
+      name: name.trim()
+    });
+  };
+  const isReturn = !!memory;
+  const lastArchId = memory?.archetypeId;
+  return /*#__PURE__*/React.createElement("div", {
+    style: SHELL
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxWidth: 560,
+      margin: "0 auto"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: C.textMuted,
+      letterSpacing: "0.22em",
+      textTransform: "uppercase",
+      marginBottom: 20,
+      display: "flex",
+      alignItems: "center",
+      gap: 10,
+      fontFamily: mono
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: C.orange
+    }
+  }, "\u25CF"), " New Activity"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: C.surface,
+      border: `1px solid ${C.border}`,
+      borderRadius: 2,
+      padding: "18px",
+      marginBottom: 16
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: C.textMuted,
+      letterSpacing: "0.18em",
+      textTransform: "uppercase",
+      marginBottom: 10,
+      fontFamily: mono
+    }
+  }, isReturn ? "Still you?" : "Who are you?"), /*#__PURE__*/React.createElement("input", {
+    value: name,
+    onChange: e => setName(e.target.value),
+    placeholder: "first name is enough",
+    style: {
+      background: "transparent",
+      border: "none",
+      borderBottom: `1px solid ${C.border}`,
+      color: C.text,
+      padding: "10px 0",
+      fontSize: 20,
+      fontFamily: serif,
+      fontStyle: "italic",
+      width: "100%",
+      outline: "none"
+    }
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: C.textMuted,
+      letterSpacing: "0.18em",
+      textTransform: "uppercase",
+      marginBottom: 10,
+      fontFamily: mono
+    }
+  }, isReturn ? "Who are you today?" : "Who are you running as?"), isReturn && lastArchId && /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: "#0f0f0f",
+      border: `1px dashed #333`,
+      borderRadius: 2,
+      padding: "10px 14px",
+      marginBottom: 12,
+      fontSize: 13,
+      color: C.textMuted,
+      fontFamily: sans
+    }
+  }, "Last time: ", /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: C.text
+    }
+  }, ARCHETYPES.find(a => a.id === lastArchId)?.name || lastArchId), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: C.textMuted
+    }
+  }, " \u2014 you can pick differently.")), ARCHETYPES.map(a => /*#__PURE__*/React.createElement("div", {
+    key: a.id,
+    onClick: () => setSel(a.id),
+    style: {
+      background: sel === a.id ? C.surfaceHigh : C.surface,
+      border: `1px solid ${sel === a.id ? C.orange : C.border}`,
+      borderLeft: `3px solid ${sel === a.id ? C.orange : a.id === lastArchId ? "#444" : C.border}`,
+      borderRadius: 2,
+      padding: "14px 16px",
+      marginBottom: 8,
+      cursor: "pointer",
+      transition: "all 0.15s"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 15,
+      color: sel === a.id ? C.orange : C.text,
+      marginBottom: 4,
+      fontFamily: serif,
+      fontStyle: "italic"
+    }
+  }, a.name, a.id === lastArchId && !sel && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11,
+      color: "#555",
+      marginLeft: 8,
+      fontFamily: mono
+    }
+  }, "(last run)")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 14,
+      color: C.textSub,
+      lineHeight: 1.65,
+      fontFamily: sans
+    }
+  }, a.desc), sel === a.id && a.id !== "custom" && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 14,
+      display: "grid",
+      gridTemplateColumns: "1fr 1fr",
+      gap: "8px 20px"
+    }
+  }, Object.entries(a.stats).map(([k, v]) => /*#__PURE__*/React.createElement("div", {
+    key: k
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      justifyContent: "space-between",
+      marginBottom: 3
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 10,
+      color: C.textMuted,
+      letterSpacing: "0.12em",
+      textTransform: "uppercase",
+      fontFamily: mono
+    }
+  }, k.replace(/([A-Z])/g, " $1")), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 10,
+      color: C.text,
+      fontFamily: mono
+    }
+  }, v, "/10")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      height: 3,
+      background: "#1e1e1e",
+      borderRadius: 1
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      height: "100%",
+      width: `${v * 10}%`,
+      background: C.orange,
+      opacity: 0.55,
+      borderRadius: 1
+    }
+  }))))), sel === a.id && a.id === "custom" && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 14
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: rem === 0 ? C.green : C.orange,
+      marginBottom: 12,
+      fontFamily: mono
+    }
+  }, rem === 0 ? "✓ Points set" : "Points left: " + rem), Object.entries(cs).map(([s, v]) => /*#__PURE__*/React.createElement("div", {
+    key: s,
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 12,
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11,
+      color: C.textSub,
+      width: 130,
+      textTransform: "uppercase",
+      letterSpacing: "0.1em",
+      fontFamily: mono
+    }
+  }, s.replace(/([A-Z])/g, " $1")), /*#__PURE__*/React.createElement("button", {
+    onClick: e => {
+      e.stopPropagation();
+      adj(s, -1);
+    },
+    style: {
+      background: "#1e1e1e",
+      border: `1px solid ${C.border}`,
+      color: C.text,
+      width: 28,
+      height: 28,
+      cursor: "pointer",
+      fontFamily: mono,
+      fontSize: 16,
+      borderRadius: 1
+    }
+  }, "\u2212"), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: C.text,
+      fontSize: 16,
+      width: 24,
+      textAlign: "center",
+      fontFamily: mono
+    }
+  }, v), /*#__PURE__*/React.createElement("button", {
+    onClick: e => {
+      e.stopPropagation();
+      adj(s, 1);
+    },
+    style: {
+      background: "#1e1e1e",
+      border: `1px solid ${C.border}`,
+      color: C.text,
+      width: 28,
+      height: 28,
+      cursor: "pointer",
+      fontFamily: mono,
+      fontSize: 16,
+      borderRadius: 1
+    }
+  }, "+")))))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 16
+    }
+  }, /*#__PURE__*/React.createElement(Btn, {
+    onClick: confirm,
+    disabled: !ok
+  }, "Begin Run"))));
+}
+function Stage({
+  stage,
+  stageIdx,
+  player,
+  text,
+  loading,
+  onContinue,
+  onQuit,
+  canQuit
+}) {
+  const accent = STAGE_ACCENT[stage.id] || C.orange;
+  const isFinish = stage.id === "finish";
+  const ecgColor = stage.id === "void" ? "#cccccc" : stage.id === "wall" ? C.red : accent;
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...SHELL,
+      background: stage.id === "void" ? "#0c0c0c" : C.bg
+    }
+  }, /*#__PURE__*/React.createElement(OrbOverlay, {
+    stageIdx: stageIdx
+  }), /*#__PURE__*/React.createElement(CrackOverlay, {
+    stageIdx: stageIdx
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxWidth: 580,
+      margin: "0 auto",
+      position: "relative",
+      zIndex: 20
+    }
+  }, /*#__PURE__*/React.createElement(RunProgress, {
+    stageIdx: stageIdx
+  }), /*#__PURE__*/React.createElement(ECGLine, {
+    type: stage.ecgType,
+    color: ecgColor,
+    opacity: stage.id === "void" ? 0.7 : 0.45
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: C.surface,
+      border: `1px solid ${C.border}`,
+      borderTop: `3px solid ${accent}`,
+      borderRadius: 2,
+      padding: "16px 18px",
+      marginBottom: 14
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: C.textMuted,
+      letterSpacing: "0.2em",
+      textTransform: "uppercase",
+      marginBottom: 6,
+      display: "flex",
+      justifyContent: "space-between",
+      fontFamily: mono
+    }
+  }, /*#__PURE__*/React.createElement("span", null, stage.km, " km"), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: accent
+    }
+  }, stage.subtitle)), /*#__PURE__*/React.createElement("h2", {
+    style: {
+      fontFamily: serif,
+      fontStyle: "italic",
+      fontSize: 30,
+      color: C.text,
+      lineHeight: 1.1
+    }
+  }, stage.name)), /*#__PURE__*/React.createElement(ActivityStats, {
+    player: player
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: C.surface,
+      border: `1px solid ${C.border}`,
+      borderRadius: 2,
+      padding: "20px",
+      marginBottom: 16
+    }
+  }, loading ? /*#__PURE__*/React.createElement(Loading, {
+    msg: "Processing..."
+  }) : /*#__PURE__*/React.createElement("p", {
+    style: {
+      fontSize: 17,
+      lineHeight: 1.85,
+      color: C.text,
+      fontStyle: "italic",
+      fontFamily: serif,
+      margin: 0
+    }
+  }, text)), !loading && /*#__PURE__*/React.createElement(Btn, {
+    onClick: onContinue
+  }, isFinish ? "Cross the Line →" : "Keep Running →"), !loading && canQuit && /*#__PURE__*/React.createElement("button", {
+    onClick: onQuit,
+    style: {
+      background: "transparent",
+      border: "none",
+      color: C.textMuted,
+      padding: "12px 0",
+      fontSize: 12,
+      letterSpacing: "0.18em",
+      textTransform: "uppercase",
+      cursor: "pointer",
+      fontFamily: mono,
+      width: "100%",
+      marginTop: 10
+    },
+    onMouseEnter: e => e.currentTarget.style.color = C.red,
+    onMouseLeave: e => e.currentTarget.style.color = C.textMuted
+  }, "Stop. Go home.")));
+}
+function Combat({
+  demon,
+  player,
+  stageIdx,
+  loading,
+  onResolve
+}) {
+  const [chosen, setChosen] = useState(null);
+  if (loading || !demon) return /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...SHELL,
+      background: "#0d0606"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxWidth: 580,
+      margin: "0 auto",
+      paddingTop: 60
+    }
+  }, /*#__PURE__*/React.createElement(Loading, {
+    msg: "Something is forming..."
+  })));
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...SHELL,
+      background: "#0d0606"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxWidth: 580,
+      margin: "0 auto"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: "#6a3030",
+      letterSpacing: "0.22em",
+      textTransform: "uppercase",
+      marginBottom: 12,
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
+      fontFamily: mono
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: C.red
+    }
+  }, "\u25B2"), " Mental Encounter \xB7 ", STAGES[stageIdx].km, " km"), /*#__PURE__*/React.createElement(ECGLine, {
+    type: "combat",
+    color: C.red,
+    opacity: 0.55,
+    height: 32
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: "#110606",
+      border: `1px solid #3a1010`,
+      borderLeft: `3px solid ${C.red}`,
+      borderRadius: 2,
+      padding: "18px",
+      marginBottom: 14
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      justifyContent: "space-between",
+      marginBottom: 8
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: "#7a3030",
+      letterSpacing: "0.2em",
+      textTransform: "uppercase",
+      fontFamily: mono
+    }
+  }, demon.type), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: "#5a2020",
+      fontFamily: mono
+    }
+  }, "HR \u25B2")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: serif,
+      fontStyle: "italic",
+      fontSize: 22,
+      color: C.red,
+      marginBottom: 12
+    }
+  }, demon.name), /*#__PURE__*/React.createElement("p", {
+    style: {
+      fontSize: 16,
+      color: "#cc9090",
+      lineHeight: 1.85,
+      fontStyle: "italic",
+      fontFamily: serif,
+      margin: 0,
+      borderLeft: `2px solid #3a1010`,
+      paddingLeft: 14
+    }
+  }, "\"", demon.taunt, "\"")), /*#__PURE__*/React.createElement(ActivityStats, {
+    player: player,
+    compact: true
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: C.textMuted,
+      letterSpacing: "0.18em",
+      textTransform: "uppercase",
+      marginBottom: 10,
+      fontFamily: mono
+    }
+  }, "How do you respond?"), RESPONSES.map(r => /*#__PURE__*/React.createElement("div", {
+    key: r.id,
+    onClick: () => setChosen(r.id),
+    style: {
+      background: chosen === r.id ? "#160808" : C.surface,
+      border: `1px solid ${chosen === r.id ? "#6a1818" : C.border}`,
+      borderLeft: `3px solid ${chosen === r.id ? C.red : C.border}`,
+      borderRadius: 2,
+      padding: "13px 15px",
+      marginBottom: 7,
+      cursor: "pointer",
+      transition: "all 0.15s"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 15,
+      color: chosen === r.id ? C.red : C.text,
+      marginBottom: 3,
+      fontFamily: serif,
+      fontStyle: "italic"
+    }
+  }, r.label), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 14,
+      color: C.textSub,
+      lineHeight: 1.5,
+      fontFamily: sans
+    }
+  }, r.desc))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 14
+    }
+  }, /*#__PURE__*/React.createElement(Btn, {
+    onClick: () => {
+      if (chosen) {
+        onResolve(chosen);
+        setChosen(null);
+      }
+    },
+    disabled: !chosen,
+    variant: "danger"
+  }, "Face It"))));
+}
+function CombatResult({
+  result,
+  narrative,
+  player,
+  loading,
+  onContinue,
+  showHint,
+  hintText,
+  stageIdx
+}) {
+  const outcomes = {
+    victory: {
+      label: "HELD",
+      color: C.green,
+      sub: "You held your ground.",
+      ecg: "victory"
+    },
+    pyrrhic: {
+      label: "SURVIVED",
+      color: C.orange,
+      sub: "You survived. Barely.",
+      ecg: "elevated"
+    },
+    loss: {
+      label: "TOOK DAMAGE",
+      color: "#c8a96e",
+      sub: "It took something.",
+      ecg: "erratic"
+    },
+    brutal: {
+      label: "CRITICAL",
+      color: C.red,
+      sub: "It tore through you.",
+      ecg: "chaotic"
+    }
+  };
+  const o = outcomes[result.outcome] || outcomes.loss;
+  const isBrutal = result.outcome === "brutal";
+  const deltas = Object.entries(result.delta).filter(([, v]) => v !== 0);
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...SHELL,
+      background: isBrutal ? "#0e0404" : C.bg
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxWidth: 580,
+      margin: "0 auto"
+    }
+  }, /*#__PURE__*/React.createElement(ECGLine, {
+    type: o.ecg,
+    color: o.color,
+    opacity: 0.6
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: C.surface,
+      border: `1px solid ${C.border}`,
+      borderTop: `3px solid ${o.color}`,
+      borderRadius: 2,
+      padding: "16px 18px",
+      marginBottom: 14
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: C.textMuted,
+      letterSpacing: "0.22em",
+      textTransform: "uppercase",
+      marginBottom: 6,
+      fontFamily: mono
+    }
+  }, "Encounter Result"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "baseline",
+      gap: 10,
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 22,
+      fontFamily: mono,
+      fontWeight: "bold",
+      color: o.color
+    }
+  }, o.label), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 14,
+      color: C.textSub,
+      fontStyle: "italic",
+      fontFamily: serif
+    }
+  }, o.sub)), deltas.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6,
+      flexWrap: "wrap"
+    }
+  }, deltas.map(([k, v]) => /*#__PURE__*/React.createElement("div", {
+    key: k,
+    style: {
+      background: v > 0 ? "#0a1a0a" : "#1a0808",
+      border: `1px solid ${v > 0 ? "#2a4a2a" : "#4a1a1a"}`,
+      borderRadius: 1,
+      padding: "3px 8px",
+      fontSize: 11,
+      fontFamily: mono,
+      color: v > 0 ? C.green : C.red
+    }
+  }, k.replace(/([A-Z])/g, " $1").toUpperCase(), " ", v > 0 ? "+" : "", v)))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: C.surface,
+      border: `1px solid ${C.border}`,
+      borderRadius: 2,
+      padding: "20px",
+      marginBottom: 14
+    }
+  }, loading ? /*#__PURE__*/React.createElement(Loading, null) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("p", {
+    style: {
+      fontSize: 17,
+      lineHeight: 1.85,
+      color: C.text,
+      fontStyle: "italic",
+      fontFamily: serif,
+      margin: 0
+    }
+  }, narrative), isBrutal && showHint && hintText && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 14,
+      borderTop: `1px solid ${C.border}`,
+      paddingTop: 14
+    }
+  }, /*#__PURE__*/React.createElement("p", {
+    style: {
+      fontSize: 14,
+      color: C.textSub,
+      fontFamily: sans,
+      margin: 0,
+      lineHeight: 1.7
+    }
+  }, hintText)))), /*#__PURE__*/React.createElement(ActivityStats, {
+    player: player,
+    compact: true
+  }), !loading && /*#__PURE__*/React.createElement(Btn, {
+    onClick: onContinue
+  }, "Continue \u2192")));
+}
+function End({
+  player,
+  ekey,
+  narrative,
+  loading,
+  onRestart
+}) {
+  const e = ENDINGS[ekey] || ENDINGS.just_broken;
+  const archetypeFlavour = player.archetype.endingFlavour?.[ekey] || "";
+  const {
+    stamina,
+    focus,
+    painTolerance,
+    willpower
+  } = player.stats;
+  const pct = Math.round((stamina + focus + painTolerance + willpower) / 40 * 100);
+  const ecgType = ekey === "dnf" ? "flatline" : ekey === "the_high" ? "resolved" : ekey === "broken_awake" || ekey === "just_broken" ? "chaotic" : "erratic";
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      ...SHELL
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxWidth: 580,
+      margin: "0 auto"
+    }
+  }, /*#__PURE__*/React.createElement(ECGLine, {
+    type: ecgType,
+    color: e.color,
+    opacity: 0.6
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: C.surface,
+      border: `1px solid ${C.border}`,
+      borderTop: `3px solid ${e.color}`,
+      borderRadius: 2,
+      padding: "18px",
+      marginBottom: 14
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: C.textMuted,
+      letterSpacing: "0.22em",
+      textTransform: "uppercase",
+      marginBottom: 10,
+      fontFamily: mono
+    }
+  }, e.label), /*#__PURE__*/React.createElement("h2", {
+    style: {
+      fontFamily: serif,
+      fontStyle: "italic",
+      fontSize: "clamp(17px,4vw,28px)",
+      color: e.color,
+      lineHeight: 1.4
+    }
+  }, e.headline)), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "1fr 1fr 1fr",
+      gap: 8,
+      marginBottom: 14
+    }
+  }, /*#__PURE__*/React.createElement(MetricCard, {
+    label: "Distance",
+    value: "10.0",
+    unit: "km",
+    highlight: true
+  }), /*#__PURE__*/React.createElement(MetricCard, {
+    label: "Vitality",
+    value: pct,
+    unit: "%",
+    highlight: pct > 50,
+    danger: pct <= 25
+  }), /*#__PURE__*/React.createElement(MetricCard, {
+    label: "Athlete",
+    value: player.name,
+    unit: ""
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: C.surface,
+      border: `1px solid ${C.border}`,
+      borderRadius: 2,
+      padding: "20px",
+      marginBottom: 14
+    }
+  }, loading ? /*#__PURE__*/React.createElement(Loading, {
+    msg: "Writing your summary..."
+  }) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("p", {
+    style: {
+      fontSize: 17,
+      lineHeight: 1.9,
+      color: C.text,
+      fontStyle: "italic",
+      fontFamily: serif,
+      marginBottom: archetypeFlavour ? 14 : 0
+    }
+  }, narrative), archetypeFlavour && /*#__PURE__*/React.createElement("p", {
+    style: {
+      fontSize: 14,
+      color: C.textSub,
+      fontFamily: sans,
+      margin: 0,
+      borderTop: `1px solid ${C.border}`,
+      paddingTop: 14,
+      lineHeight: 1.7
+    }
+  }, archetypeFlavour))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: C.surface,
+      border: `1px solid ${C.border}`,
+      borderRadius: 2,
+      padding: "14px 18px",
+      marginBottom: 18
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: C.textMuted,
+      letterSpacing: "0.2em",
+      textTransform: "uppercase",
+      marginBottom: 12,
+      fontFamily: mono
+    }
+  }, "Final State"), /*#__PURE__*/React.createElement(StatRow, {
+    label: "Stamina",
+    value: stamina,
+    color: C.orange
+  }), /*#__PURE__*/React.createElement(StatRow, {
+    label: "Focus",
+    value: focus,
+    color: C.blue
+  }), /*#__PURE__*/React.createElement(StatRow, {
+    label: "Pain Tol.",
+    value: painTolerance,
+    color: C.red
+  }), /*#__PURE__*/React.createElement(StatRow, {
+    label: "Willpower",
+    value: willpower,
+    color: C.green
+  })), !loading && /*#__PURE__*/React.createElement(Btn, {
+    onClick: onRestart
+  }, "Run Again")));
+}
+
+// ── APP ───────────────────────────────────────────────────────────────────────
+
+function App() {
+  const [screen, setScreen] = useState("title");
+  const [player, setPlayer] = useState(null);
+  const [stageIdx, setStageIdx] = useState(0);
+  const [stageText, setStageText] = useState("");
+  const [demon, setDemon] = useState(null);
+  const [cResult, setCResult] = useState(null);
+  const [cNarr, setCNarr] = useState("");
+  const [endNarr, setEndNarr] = useState("");
+  const [ekey, setEkey] = useState("just_broken");
+  const [loading, setLoading] = useState(false);
+  const [log, setLog] = useState([]);
+  const [dCount, setDCount] = useState(0);
+  const [hasBrutal, setHasBrutal] = useState(false);
+  const [showHint, setShowHint] = useState(false);
+  const [lastDemonType, setLastDemonType] = useState(null);
+  const [memory, setMemory] = useState(null); // Hades-style prior run memory
+  const lastDemonNameRef = useRef(null);
+
+  // Load memory on mount
+  useEffect(() => {
+    loadMemory().then(m => {
+      if (m) setMemory(m);
+    });
+  }, []);
+
+  // ── Generators ──────────────────────────────────────────────────────────────
+
+  const genStage = async (stg, plyr, history, mem) => {
+    setLoading(true);
+    setStageText("");
+    const prevRunCtx = mem ? `The runner has done this before. Last time they ran as ${mem.archetype} and reached ${mem.stageReached}. The result was: "${mem.echo}". Let this colour the narration faintly — not explicitly, just in tone.` : "";
+    const voidCtx = stg.id === "void" ? history.length > 0 ? `The runner's choices this run: ${history.join("; ")}. The Void replays these as regrets.${mem ? " Last run they ${mem.echo}. That ghost is here too." : " "} Make it specific and personal.` : mem ? `The Void. Last time the runner ${mem.echo}. That's the thing coming back now.` : "" : "";
+    const sys = `You write a runner's inner monologue. Second person, present tense.
+Style: raw, fragmented, honest. Short punchy sentences mixed with longer ones. Real thoughts — not literary. The specific things that run through someone's head when running: the stupid thing replaying, the body's complaints being shoved aside, the mind wandering and then snapping back. Darkly funny sometimes. Keep it to 2 short paragraphs maximum. No repetition within a paragraph.
+${IMMERSION}${prevRunCtx ? "\n" + prevRunCtx : ""}`;
+    try {
+      setStageText(await aiText(sys, `Stage: ${stg.name} (${stg.subtitle}). Runner archetype: ${plyr.archetype.name}.\n${voidCtx}\nWrite the stage opening. Do not mention kilometres or distances.`));
+    } catch {
+      setStageText("The road goes on. You go with it.");
+    }
+    setLoading(false);
+  };
+  const genDemon = async (stg, plyr, num) => {
+    setLoading(true);
+    setDemon(null);
+    const type = pickDemonType(plyr.archetype, plyr.stats);
+    setLastDemonType(type);
+    const avoid = lastDemonNameRef.current ? `IMPORTANT: Do NOT generate a demon named "${lastDemonNameRef.current}" or anything similar. This must be a completely different manifestation.` : "";
+    const dStyle = {
+      Anxiety: "speaks in spirals. Each sentence escalates the last. Gets louder when engaged with.",
+      Rage: "short declarative accusations. Certain. It wants a reaction.",
+      Sadness: "quiet and flat. States things like facts. Doesn't need to raise its voice.",
+      Shame: "points at specific things you did. Invites you to look more closely. Grows when examined.",
+      Obsession: "loops back to the same point. Needs you to keep engaging with it."
+    };
+    const sys = `Generate a psychological feeling that surfaces during a run. Not a fantasy creature — a real mental state.
+Type: ${type}. Voice style: ${dStyle[type]}
+${avoid}
+Return ONLY valid JSON, no markdown fences:
+{"name":"the specific feeling in 3-5 words","taunt":"2-3 sentences first person from this feeling. Personal and specific — work pressure, an unfinished conversation, old inadequacy, quiet grief, a loop that won't stop. The voice that knows which wound is still open."}
+${IMMERSION}`;
+    try {
+      const p = await aiJSON(sys, `Stage: ${stg.name}. Runner: ${plyr.archetype.name}. Encounter ${num} of ${DEMONS_PER_STAGE}.`);
+      lastDemonNameRef.current = p.name;
+      setDemon({
+        ...p,
+        type
+      });
+    } catch {
+      // Varied fallbacks so the same name never repeats
+      const fallbacks = [{
+        name: "The Thing You're Avoiding",
+        taunt: "You know what it is. You've been stepping around it for weeks. Running doesn't change that."
+      }, {
+        name: "The Unfinished Thought",
+        taunt: "You didn't finish it last time either. You just stopped thinking about it. That's not the same thing."
+      }, {
+        name: "What You Didn't Say",
+        taunt: "There's still time to say it. There's always still time. That's almost the worst part."
+      }, {
+        name: "The Background Noise",
+        taunt: "It was there this morning. It's here now. It'll be there when you get back."
+      }, {
+        name: "The Low Hum",
+        taunt: "Nothing specific. Just this. This feeling you can't put a name to that sits behind everything."
+      }];
+      const prev = lastDemonNameRef.current;
+      const options = fallbacks.filter(f => f.name !== prev);
+      const fb = options[Math.floor(Math.random() * options.length)] || fallbacks[0];
+      lastDemonNameRef.current = fb.name;
+      setDemon({
+        name: fb.name,
+        taunt: fb.taunt,
+        type
+      });
+    }
+    setLoading(false);
+  };
+  const genCombatNarr = async (d, response, result, plyr) => {
+    setLoading(true);
+    setCNarr("");
+    const fitNote = {
+      primary: "The response was right for this kind of feeling.",
+      adjacent: "The response was close but not quite right — it cost something.",
+      neutral: "The response didn't particularly help or hurt.",
+      dissonant: "The response made things worse — wrong energy entirely."
+    };
+    const sys = `Narrate what just happened inside a runner's head after facing a difficult feeling. 2 short paragraphs, second person.
+${fitNote[result.fit]} Outcome: ${result.outcome}.
+victory = relief, not triumph. The feeling faded for now.
+pyrrhic = still standing but it cost something.
+loss = it got through.
+brutal = responding wrong made it louder and harder to shift.
+Tone: dry, honest, specific. Like someone describing what actually just happened in their head. No melodrama. No literary flourishes. Avoid starting with "You". Do not mention any numbers.
+${IMMERSION}`;
+    try {
+      setCNarr(await aiText(sys, `Feeling: "${d.name}" (${d.type}). It said: "${d.taunt}". Response: ${response}. Runner: ${plyr.archetype.name}.`, 260));
+    } catch {
+      setCNarr("You keep moving. The road doesn't care either way.");
+    }
+    setLoading(false);
+  };
+  const genEnd = async (plyr, key, history, mem) => {
+    setLoading(true);
+    setEndNarr("");
+    const archNote = {
+      freak: "This runner tracks everything. Their internal voice is competitive even in collapse.",
+      workaholic: "This runner never fully escaped their work brain. Something unresolved always lingered.",
+      worrier: "This runner was always a little afraid of their own body. There's always a small background question of whether this was okay.",
+      redemption: "This runner didn't know why they were running. Every step was a kind of apology. There's no triumph in finishing — just the fact of having done it.",
+      custom: "This runner is whoever they chose to be today."
+    };
+    const prevEcho = mem ? `The last time this runner went out, ${mem.echo}. That's the shadow over this run.` : "";
+    const endInstr = {
+      the_high: "Runner's high at the end — the real version. Not motivational. Slightly unhinged: things look wrong in a good way, emotional about nothing, body feels borrowed. You know it won't last. Darkly funny. 2 short paragraphs, second person.",
+      hollow: "Runner finished but something went quiet inside halfway through and never came back. Write the strange flatness of crossing a line when part of you already checked out. Not tragic, not triumphant. 2 short paragraphs, second person.",
+      grimaced: "Runner's mind gave up. Body didn't get the message and kept going. The strangeness of finishing on pure stubbornness. Darkly funny. 2 short paragraphs, second person.",
+      broken_awake: "Runner finished broken but with unusual clarity — watched themselves fall apart with detached precision. Strange dignity of collapsing lucidly. Not redemptive, not hollow. 2 short paragraphs, second person.",
+      just_broken: "Runner finished broken. No silver lining. No lesson. Honest weight of crossing a line with nothing left. No comfort. 2 short paragraphs, second person.",
+      dnf: "Runner stopped and turned back. Write the quiet moment when they decide to stop — not at a finish line but somewhere in the middle. Not failure, not success. Tender. 2 short paragraphs, second person."
+    };
+    const sys = `${endInstr[key] || endInstr.just_broken}
+Character note: ${archNote[plyr.archetype.id] || ""}
+${prevEcho}
+${IMMERSION}`;
+    const msg = `Runner: ${plyr.name}, ${plyr.archetype.name}. Run history: ${history.join("; ") || "a sequence of choices"}.`;
+    const fallbacks = {
+      the_high: "You're floating. The ground is very far away. You did it.",
+      hollow: "You crossed the line. Something stayed behind around halfway.",
+      grimaced: "Your body got you here. Your mind resigned a few kilometres back.",
+      broken_awake: "You fell apart and watched yourself do it with unusual clarity.",
+      just_broken: "You crossed the line. Whatever you were carrying is still there.",
+      dnf: "You stopped. You turned around. That was its own decision."
+    };
+    try {
+      setEndNarr(await aiText(sys, msg, 380));
+    } catch {
+      setEndNarr(fallbacks[key] || fallbacks.just_broken);
+    }
+    setLoading(false);
+  };
+
+  // ── Handlers ──────────────────────────────────────────────────────────────
+
+  const startGame = p => {
+    setPlayer(p);
+    setStageIdx(0);
+    setLog([]);
+    setDCount(0);
+    setHasBrutal(false);
+    lastDemonNameRef.current = null;
+    setScreen("stage");
+    genStage(STAGES[0], p, [], memory);
+  };
+  const onStageContinue = () => {
+    if (stageIdx === 0) {
+      advance();
+      return;
+    }
+    if (stageIdx === LAST_IDX) {
+      finish(!isBroken(player.stats), false);
+      return;
+    }
+    setDCount(0);
+    lastDemonNameRef.current = null;
+    genDemon(STAGES[stageIdx], player, 1);
+    setScreen("combat");
+  };
+  const onQuit = () => finish(false, true);
+  const onFaceIt = async response => {
+    const result = resolveCombat(demon, response, player.stats);
+    const newStats = applyDelta(player.stats, result.delta);
+    const newP = {
+      ...player,
+      stats: newStats
+    };
+    setPlayer(newP);
+    setCResult(result);
+    setLog(prev => [...prev, `${STAGES[stageIdx].name}: "${demon.name}" — ${response} (${result.outcome})`]);
+    const isFirst = result.outcome === "brutal" && !hasBrutal;
+    if (isFirst) {
+      setHasBrutal(true);
+      setShowHint(true);
+    } else setShowHint(false);
+    setScreen("combatResult");
+    await genCombatNarr(demon, response, result, newP);
+  };
+  const onResultContinue = () => {
+    const next = dCount + 1;
+    setDCount(next);
+    if (isBroken(player.stats)) {
+      finish(false, false);
+      return;
+    }
+    if (next < DEMONS_PER_STAGE) {
+      genDemon(STAGES[stageIdx], player, next + 1);
+      setScreen("combat");
+    } else advance();
+  };
+  const advance = () => {
+    const ni = stageIdx + 1;
+    if (ni >= STAGES.length) {
+      finish(!isBroken(player.stats), false);
+      return;
+    }
+    setStageIdx(ni);
+    setScreen("stage");
+    genStage(STAGES[ni], player, log, memory);
+  };
+  const finish = async (success, quit) => {
+    const key = endingKey(player.stats, !success, quit);
+    setEkey(key);
+    setScreen("end");
+    // Save run memory before generating end narration
+    const stageNames = ["Start Line", "First Mile", "The Wall", "The Void", "The Finish"];
+    const reached = stageNames[stageIdx] || "Start Line";
+    const echo = ENDINGS[key]?.headline || "crossed the line";
+    const newMem = {
+      name: player.name,
+      archetype: player.archetype.name,
+      archetypeId: player.archetype.id,
+      endingKey: key,
+      stageReached: reached,
+      echo: echo,
+      timestamp: Date.now()
+    };
+    setMemory(newMem);
+    saveMemory(newMem);
+    genEnd(player, key, log, memory);
+  };
+  const restart = () => {
+    setPlayer(null);
+    setStageIdx(0);
+    setLog([]);
+    setDCount(0);
+    setDemon(null);
+    setCResult(null);
+    setHasBrutal(false);
+    lastDemonNameRef.current = null;
+    setScreen("title");
+  };
+  const canQuit = stageIdx > 0 && stageIdx < LAST_IDX;
+  const hintText = lastDemonType ? BRUTAL_HINTS[lastDemonType] : "";
+  if (screen === "title") return /*#__PURE__*/React.createElement(Title, {
+    onStart: () => setScreen("character"),
+    memory: memory
+  });
+  if (screen === "character") return /*#__PURE__*/React.createElement(Character, {
+    onConfirm: startGame,
+    memory: memory
+  });
+  if (screen === "stage") return /*#__PURE__*/React.createElement(Stage, {
+    stage: STAGES[stageIdx],
+    stageIdx: stageIdx,
+    player: player,
+    text: stageText,
+    loading: loading,
+    onContinue: onStageContinue,
+    onQuit: onQuit,
+    canQuit: canQuit
+  });
+  if (screen === "combat") return /*#__PURE__*/React.createElement(Combat, {
+    demon: demon,
+    player: player,
+    stageIdx: stageIdx,
+    loading: loading,
+    onResolve: onFaceIt
+  });
+  if (screen === "combatResult") return /*#__PURE__*/React.createElement(CombatResult, {
+    result: cResult,
+    narrative: cNarr,
+    player: player,
+    demonType: lastDemonType,
+    loading: loading,
+    onContinue: onResultContinue,
+    showHint: showHint,
+    hintText: hintText,
+    stageIdx: stageIdx
+  });
+  if (screen === "end") return /*#__PURE__*/React.createElement(End, {
+    player: player,
+    ekey: ekey,
+    narrative: endNarr,
+    loading: loading,
+    onRestart: restart
+  });
+  return null;
+}
+ReactDOM.createRoot(document.getElementById("root")).render(/*#__PURE__*/React.createElement(App, null));
+
+</script>
+</body>
+</html>
